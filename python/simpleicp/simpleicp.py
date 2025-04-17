@@ -11,6 +11,7 @@ import time
 from dataclasses import fields
 from pathlib import Path
 from typing import Optional, Tuple
+import logging
 
 import numpy as np
 
@@ -18,15 +19,28 @@ from . import corrpts, mathutils, optimization, pointcloud
 
 # TODO Rename rbp (rigid-body parameters) to rbtp (rigid-body transformation parameters)
 
+_log = logging.getLogger(__name__)
+
 
 class SimpleICP:
     """Class for setting up and run simpleICP."""
 
-    def __init__(self) -> None:
-        """Constructor method."""
+    def __init__(self, verbose: bool = False) -> None:
+        """
+        Constructor method.
+
+        Args:
+            verbose (bool): print information about the ICP run to stdout
+        """
 
         self.pc1 = None
         self.pc2 = None
+
+        if verbose:
+            _log.setLevel(logging.INFO)
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(message)s'))
+            _log.addHandler(handler)
 
     def add_point_clouds(
         self,
@@ -112,7 +126,7 @@ class SimpleICP:
         start_time = time.time()
 
         if debug_dirpath:
-            print(f'Write debug files to directory "{debug_dirpath}"')
+            _log.info(f'Write debug files to directory "{debug_dirpath}"')
             Path(debug_dirpath).mkdir(parents=True, exist_ok=True)
 
         # Convert angle valus from degree -> radian
@@ -130,7 +144,7 @@ class SimpleICP:
 
         if np.isfinite(max_overlap_distance):
 
-            print("Consider partial overlap of point clouds ...")
+            _log.info("Consider partial overlap of point clouds ...")
             self.pc2.transform_by_H(H)  # temporarily transform pc2
             self.pc1.select_in_range(self.pc2.X, max_range=max_overlap_distance)
             self.pc2.transform_by_H(np.linalg.inv(H))  # undo transformation
@@ -142,17 +156,17 @@ class SimpleICP:
                     "max_overlap_distance."
                 )
 
-        print("Select points for correspondences in fixed point cloud ...")
+        _log.info("Select points for correspondences in fixed point cloud ...")
         self.pc1.select_n_points(correspondences)
         selected_orig = self.pc1["selected"]
 
         if not {"nx", "ny", "nz", "planarity"}.issubset(self.pc1.columns):
-            print("Estimate normals of selected points ...")
+            _log.info("Estimate normals of selected points ...")
             self.pc1.estimate_normals(neighbors)
 
         distance_residuals = []
 
-        print("Start iterations ...")
+        _log.info("Start iterations ...")
         for it in range(0, max_iterations):
 
             cp = corrpts.CorrPts(self.pc1, self.pc2)
@@ -227,39 +241,39 @@ class SimpleICP:
                     distance_residuals[it], distance_residuals[it - 1], min_change
                 ):
                     optim.estimate_parameter_uncertainties()
-                    print("Convergence criteria fulfilled -> stop iteration!")
+                    _log.info("Convergence criteria fulfilled -> stop iteration!")
                     break
 
             if it == 0:
-                print(
+                _log.info(
                     f"{'iteration':>9s} | "
                     f"{'correspondences':>15s} | "
                     f"{'mean(residuals)':>15s} | "
                     f"{'std(residuals)':>15s}"
                 )
-                print(
+                _log.info(
                     f"{'orig:0':>9s} | "
                     f"{len(initial_distances):15d} | "
                     f"{np.mean(initial_distances):15.4f} | "
                     f"{np.std(initial_distances):15.4f}"
                 )
-            print(
+            _log.info(
                 f"{it+1:9d} | "
                 f"{len(distance_residuals[it]):15d} | "
                 f"{np.mean(distance_residuals[it]):15.4f} | "
                 f"{np.std(distance_residuals[it]):15.4f}"
             )
 
-        print("Estimated transformation matrix H:")
-        print(f"[{H[0, 0]:12.6f} {H[0, 1]:12.6f} {H[0, 2]:12.6f} {H[0, 3]:12.6f}]")
-        print(f"[{H[1, 0]:12.6f} {H[1, 1]:12.6f} {H[1, 2]:12.6f} {H[1, 3]:12.6f}]")
-        print(f"[{H[2, 0]:12.6f} {H[2, 1]:12.6f} {H[2, 2]:12.6f} {H[2, 3]:12.6f}]")
-        print(f"[{H[3, 0]:12.6f} {H[3, 1]:12.6f} {H[3, 2]:12.6f} {H[3, 3]:12.6f}]")
+        _log.info("Estimated transformation matrix H:")
+        _log.info(f"[{H[0, 0]:12.6f} {H[0, 1]:12.6f} {H[0, 2]:12.6f} {H[0, 3]:12.6f}]")
+        _log.info(f"[{H[1, 0]:12.6f} {H[1, 1]:12.6f} {H[1, 2]:12.6f} {H[1, 3]:12.6f}]")
+        _log.info(f"[{H[2, 0]:12.6f} {H[2, 1]:12.6f} {H[2, 2]:12.6f} {H[2, 3]:12.6f}]")
+        _log.info(f"[{H[3, 0]:12.6f} {H[3, 1]:12.6f} {H[3, 2]:12.6f} {H[3, 3]:12.6f}]")
 
-        print(
+        _log.info(
             "... which corresponds to the following rigid-body transformation parameters:"
         )
-        print(
+        _log.info(
             f"{'parameter':>9s} | "
             f"{'est.value':>15s} | "
             f"{'est.uncertainty':>15s} | "
@@ -267,7 +281,7 @@ class SimpleICP:
             f"{'obs.weight':>15s}"
         )
         for parameter in fields(rbp):
-            print(
+            _log.info(
                 f"{parameter.name:>9s} | "
                 f"{getattr(rbp, parameter.name).estimated_value_scaled:15.6f} | "
                 f"{getattr(rbp, parameter.name).estimated_uncertainty_scaled:15.6f} | "
@@ -275,7 +289,7 @@ class SimpleICP:
                 f"{getattr(rbp, parameter.name).observation_weight:15.3e}"
             )
 
-        print(
+        _log.info(
             "(Unit of est.value, est.uncertainty, and obs.value for alpha1/2/3 is degree)"
         )
 
@@ -286,7 +300,7 @@ class SimpleICP:
                 Path(debug_dirpath).joinpath(f"iteration{it:03d}_postoptim_pcmov.xyz")
             )
 
-        print(f"Finished in {time.time() - start_time:.3f} seconds!")
+        _log.info(f"Finished in {time.time() - start_time:.3f} seconds!")
 
         return H, self.pc2.X, rbp, distance_residuals[it]
 
